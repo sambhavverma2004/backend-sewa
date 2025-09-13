@@ -6,6 +6,9 @@ from flask_migrate import Migrate
 from models import db, User, Listing
 import cloudinary
 import cloudinary.uploader
+# You might need these for your price scraper
+import requests
+from bs4 import BeautifulSoup
 
 # Load environment variables from a .env file for local development
 load_dotenv()
@@ -14,8 +17,6 @@ app = Flask(__name__)
 CORS(app)
 
 # --- Database Configuration ---
-# On Render, it will use the DATABASE_URL environment variable.
-# Locally, it will use the sqlite file.
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///sewa_mandi.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -32,27 +33,36 @@ migrate = Migrate(app, db)
 
 
 # --- API Endpoints ---
-# Your existing /price endpoint remains unchanged...
+
+# --- ✅ NEW: The missing home page route ---
+@app.route("/")
+def home():
+    return jsonify({"message": "SEWA Mandi Backend is running successfully 🎉"})
+
+# Your existing /price endpoint
 @app.route("/price", methods=["GET"])
 def get_price():
-    # ... your price scraping logic ...
-    pass # (Keeping this brief as it's unchanged)
+    # ... your full price scraping logic goes here ...
+    # This is just a placeholder to ensure it exists
+    state = request.args.get("state", "").strip().lower()
+    if not state:
+        return jsonify({"error": "State is required"}), 400
+    return jsonify({"message": f"Price data for {state} would be here."})
 
-# --- UPDATED Endpoint to create a listing WITH an image ---
+
+# --- Marketplace Endpoints ---
+
 @app.route('/api/listings', methods=['POST'])
 def create_listing():
-    # 'request.files' holds the image, 'request.form' holds the text data
     image_file = request.files.get('image')
     data = request.form
 
     if not image_file:
         return jsonify({"error": "Image is required"}), 400
 
-    # Upload the image to Cloudinary
     upload_result = cloudinary.uploader.upload(image_file)
     image_url = upload_result.get('secure_url')
 
-    # Find or create a user (replace with real auth later)
     user = User.query.first()
     if not user:
         user = User(phone_number="1234567890", name="Sukhdev Singh", village="Moga")
@@ -67,17 +77,20 @@ def create_listing():
         price=data.get('price'),
         price_unit=data.get('price_unit'),
         location_text=data.get('location_text'),
-        image_url=image_url # Save the URL from Cloudinary
+        image_url=image_url
     )
     db.session.add(new_listing)
     db.session.commit()
     
     return jsonify(new_listing.to_dict()), 201
 
-# Get listings endpoint remains the same
 @app.route('/api/listings', methods=['GET'])
 def get_listings():
-    # ... your get listings logic ...
     query = Listing.query.filter_by(status='available')
+    
+    listing_type = request.args.get('type')
+    if listing_type:
+        query = query.filter_by(listing_type=listing_type)
+        
     listings = query.order_by(Listing.created_at.desc()).all()
     return jsonify([l.to_dict() for l in listings])
