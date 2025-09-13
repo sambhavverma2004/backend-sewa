@@ -94,3 +94,10 @@ def get_listings():
         
     listings = query.order_by(Listing.created_at.desc()).all()
     return jsonify([l.to_dict() for l in listings])
+# --- NEW --- Endpoint to get a single listing by its ID
+@app.route('/api/listings/<int:listing_id>', methods=['GET'])
+def get_listing_detail(listing_id):
+    listing = Listing.query.get(listing_id)
+    if not listing:
+        return jsonify({"error": "Listing not found"}), 404
+    return jsonify(listing.to_dict())
