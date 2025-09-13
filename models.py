@@ -46,6 +46,7 @@ class Listing(db.Model):
             "title": self.title,
             "description": self.description,
             "price": self.price,
+            "phone_number": self.phone_number,
             "price_unit": self.price_unit,
             "includes_operator": self.includes_operator,
             "location_text": self.location_text,
