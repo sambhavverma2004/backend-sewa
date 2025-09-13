@@ -101,3 +101,51 @@ def get_listing_detail(listing_id):
     if not listing:
         return jsonify({"error": "Listing not found"}), 404
     return jsonify(listing.to_dict())
+# In app.py, add these new routes
+
+@app.route('/api/listings/<int:listing_id>/book', methods=['POST'])
+def create_booking(listing_id):
+    data = request.get_json()
+    # In a real app, renter_id would come from the logged-in user's token
+    renter_id = data.get('renter_id', 1) # Using user 1 as default for now
+    
+    # Simple date handling for now
+    from datetime import datetime
+    start_date = datetime.utcnow()
+    end_date = datetime.utcnow()
+
+    new_booking = Booking(
+        listing_id=listing_id,
+        renter_id=renter_id,
+        start_date=start_date,
+        end_date=end_date,
+        status='pending'
+    )
+    db.session.add(new_booking)
+    db.session.commit()
+    
+    return jsonify(new_booking.to_dict()), 201
+
+@app.route('/api/bookings/<int:booking_id>', methods=['PUT'])
+def update_booking(booking_id):
+    data = request.get_json()
+    new_status = data.get('status')
+    
+    booking = Booking.query.get(booking_id)
+    if not booking:
+        return jsonify({"error": "Booking not found"}), 404
+        
+    # Add logic here to ensure only the item owner can change the status
+    
+    booking.status = new_status
+    db.session.commit()
+    
+    return jsonify(booking.to_dict())
+
+@app.route('/api/my-bookings', methods=['GET'])
+def get_my_bookings():
+    # In a real app, user_id would come from the logged-in user's token
+    user_id = request.args.get('user_id', 1)
+    
+    bookings = Booking.query.filter_by(renter_id=user_id).all()
+    return jsonify([b.to_dict() for b in bookings])

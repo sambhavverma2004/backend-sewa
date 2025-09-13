@@ -52,3 +52,36 @@ class Listing(db.Model):
             "image_url": self.image_url,
             "status": self.status
         }
+# In models.py, add these two classes at the bottom
+
+class Booking(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    listing_id = db.Column(db.Integer, db.ForeignKey('listing.id'), nullable=False)
+    renter_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    start_date = db.Column(db.DateTime, nullable=False)
+    end_date = db.Column(db.DateTime, nullable=False)
+    status = db.Column(db.String(20), default='pending', nullable=False) # pending, confirmed, completed, cancelled
+    created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
+
+    # Relationships to get listing and renter info easily
+    listing = db.relationship('Listing', backref='bookings')
+    renter = db.relationship('User', backref='bookings')
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "listing_id": self.listing_id,
+            "listing_title": self.listing.title,
+            "renter": self.renter.to_dict(),
+            "status": self.status,
+            # Dates can be formatted here if needed
+        }
+
+class Review(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    booking_id = db.Column(db.Integer, db.ForeignKey('booking.id'), nullable=False)
+    reviewer_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    reviewee_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    rating = db.Column(db.Integer, nullable=False) # 1 to 5 stars
+    comment = db.Column(db.Text)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=func.now())
