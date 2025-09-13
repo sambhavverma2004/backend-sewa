@@ -149,3 +149,32 @@ def get_my_bookings():
     
     bookings = Booking.query.filter_by(renter_id=user_id).all()
     return jsonify([b.to_dict() for b in bookings])
+
+# In app.py, add these new routes for the owner
+
+@app.route('/api/my-listings', methods=['GET'])
+def get_my_listings():
+    # In a real app, user_id would come from a login token.
+    # We'll use the default user 1 for now.
+    owner_id = request.args.get('owner_id', 1) 
+    
+    user = User.query.get(owner_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+        
+    listings = user.listings # Using the backref relationship we defined in models.py
+    return jsonify([l.to_dict() for l in listings])
+
+@app.route('/api/my-listings/<int:listing_id>/bookings', methods=['GET'])
+def get_bookings_for_listing(listing_id):
+    # This fetches all booking requests for a specific item a user owns.
+    listing = Listing.query.get(listing_id)
+    if not listing:
+        return jsonify({"error": "Listing not found"}), 404
+
+    # Add a check to ensure the person asking is the owner
+    # owner_id = get_current_user_id()
+    # if listing.owner_id != owner_id:
+    #     return jsonify({"error": "Unauthorized"}), 403
+
+    return jsonify([b.to_dict() for b in listing.bookings])
