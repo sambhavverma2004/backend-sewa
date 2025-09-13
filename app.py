@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_migrate import Migrate
-from models import db, User, Listing, Booking, Review # Import Booking and Review
+from models import db, User, Listing, Booking, Review
 import cloudinary
 import cloudinary.uploader
 import requests
@@ -14,19 +14,21 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# --- Configurations ---
+# --- Database Configuration ---
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///sewa_mandi.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# --- ✅ UPDATED: Cloudinary Configuration with Hardcoded Keys ---
+# WARNING: This is not recommended for production. Use Environment Variables for better security.
 cloudinary.config(
-    cloud_name = os.environ.get('CLOUDINARY_CLOUD_NAME'),
-    api_key = os.environ.get('CLOUDINARY_API_KEY'),
-    api_secret = os.environ.get('CLOUDINARY_API_SECRET')
+    cloud_name = "dvtjxxbtm",
+    api_key = "223263778434147",
+    api_secret = "V7MVxbF-NWQtJvWTZbtvxy9yBPI"
 )
 
 # --- Initializations ---
 db.init_app(app)
 migrate = Migrate(app, db)
-
 
 # --- API Endpoints ---
 
@@ -44,12 +46,14 @@ def get_price():
 
 @app.route('/api/listings', methods=['POST'])
 def create_listing():
-    # Your create listing logic...
     image_file = request.files.get('image')
     data = request.form
     if not image_file: return jsonify({"error": "Image is required"}), 400
+    
+    # This will now work correctly with the hardcoded keys
     upload_result = cloudinary.uploader.upload(image_file)
     image_url = upload_result.get('secure_url')
+    
     user = User.query.first()
     if not user:
         user = User(phone_number="1234567890", name="Sukhdev Singh", village="Moga")
@@ -93,7 +97,6 @@ def update_booking(booking_id):
     db.session.commit()
     return jsonify(booking.to_dict())
 
-# --- ✅ THIS IS THE ROUTE THAT WAS LIKELY MISSING ---
 @app.route('/api/my-listings', methods=['GET'])
 def get_my_listings():
     owner_id = request.args.get('owner_id', 1) 
@@ -112,3 +115,21 @@ def get_my_bookings():
     user_id = request.args.get('user_id', 1)
     bookings = Booking.query.filter_by(renter_id=user_id).all()
     return jsonify([b.to_dict() for b in bookings])
+
+@app.route('/api/reviews', methods=['POST'])
+def post_review():
+    data = request.get_json()
+    new_review = Review(
+        booking_id=data.get('booking_id'),
+        reviewer_id=data.get('reviewer_id'),
+        reviewee_id=data.get('reviewee_id'),
+        rating=data.get('rating'),
+        comment=data.get('comment')
+    )
+    db.session.add(new_review)
+    user_to_update = User.query.get(data.get('reviewee_id'))
+    if user_to_update:
+        ratings = [r.rating for r in Review.query.filter_by(reviewee_id=user_to_update.id).all()]
+        user_to_update.average_rating = sum(ratings) / len(ratings) if ratings else 5.0
+    db.session.commit()
+    return jsonify({"message": "Review submitted successfully"}), 201
