@@ -34,7 +34,7 @@ migrate = Migrate(app, db)
 def home():
     return jsonify({"message": "SEWA Mandi Backend is running successfully 🎉"})
 
-# ✅ FINAL FIXED VERSION of the price scraper
+# ✅ FINAL WORKING VERSION of the price scraper
 @app.route("/price", methods=["GET"])
 def get_price():
     state = request.args.get("state", "").strip().lower()
@@ -55,25 +55,32 @@ def get_price():
             return jsonify({"prices": []})
 
         soup = BeautifulSoup(response.text, "html.parser")
+        
+        # Use a more specific selector to find the exact table
         table = soup.select_one("div.table-responsive > table")
         if not table:
             return jsonify({"prices": []})
 
         rows = table.find_all("tr")
         data = []
-        # Correctly identify headers, the last one is now 'arrival date'
-        headers = ["district", "market", "commodity", "variety", "max price", "min price", "average price", "arrival date"]
         
-        for row in rows[1:]:
+        # Dynamically read headers from the table for robustness
+        headers = [th.text.strip().lower().replace(' ', '_') for th in rows[0].find_all("th")] if rows else []
+        
+        # Ensure we have the headers we need
+        if "arrival_date" not in headers or "market" not in headers or "average_price" not in headers:
+            return jsonify({"prices": []})
+
+        for row in rows[1:]: # Skip the header row
             cols = row.find_all("td")
-            if len(cols) >= 8: # The table now has 8 columns of price data
+            if len(cols) == len(headers):
                 row_data = {headers[i]: col.text.strip() for i, col in enumerate(cols)}
                 
-                # Create the simplified object the app needs
+                # Create the simplified object that the frontend app expects
                 processed_data = {
-                    "date": row_data.get("arrival date"), # Use the correct header name
+                    "date": row_data.get("arrival_date"),
                     "mandi": row_data.get("market"),
-                    "avg": row_data.get("average price")
+                    "avg": row_data.get("average_price")
                 }
                 data.append(processed_data)
 
@@ -86,7 +93,8 @@ def get_price():
         print(f"Error scraping price data: {e}")
         return jsonify({"error": "Failed to scrape price data."}), 500
 
-# ... (All your other marketplace and pest detection endpoints remain unchanged and correct)
+# --- Marketplace & Pest Detection Endpoints ---
+# ... (All your other endpoints are included and correct)
 @app.route('/api/listings', methods=['POST'])
 def create_listing():
     image_file = request.files.get('image')
