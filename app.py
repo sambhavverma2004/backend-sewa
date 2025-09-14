@@ -17,7 +17,6 @@ CORS(app)
 # --- Configurations ---
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///sewa_mandi.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-# Using hardcoded keys as requested
 cloudinary.config(
     cloud_name="dvtjxxbtm",
     api_key="223263778434147",
@@ -35,7 +34,7 @@ migrate = Migrate(app, db)
 def home():
     return jsonify({"message": "SEWA Mandi Backend is running successfully 🎉"})
 
-# ✅ FIXED: Restored the full, working price scraping logic
+# ✅ FIXED: This version has a more robust scraper and better logging
 @app.route("/price", methods=["GET"])
 def get_price():
     state = request.args.get("state", "").strip().lower()
@@ -51,35 +50,50 @@ def get_price():
         url = f"https://www.napanta.com/agri-commodity-prices/{state}/{commodity}/"
 
     try:
-        response = requests.get(url)
+        print(f"Scraping URL: {url}") # Log the URL being scraped
+        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+        
         if response.status_code != 200:
+            print(f"Scraping failed: Received status code {response.status_code}")
             return jsonify({"prices": []})
 
         soup = BeautifulSoup(response.text, "html.parser")
-        table = soup.find("table")
+        
+        # More robustly find the table inside the specific div
+        table = soup.select_one("div.table-responsive > table") 
         if not table:
+            print("Scraping failed: Could not find the price table on the page.")
             return jsonify({"prices": []})
 
         rows = table.find_all("tr")
         data = []
-        headers = ["date", "mandi", "min", "max", "avg"]
+        # Use the table headers to create keys dynamically and safely
+        headers = [th.text.strip().lower() for th in rows[0].find_all("th")] if rows else []
+        
         for row in rows[1:]:
             cols = row.find_all("td")
-            if len(cols) >= 5:
+            if len(cols) == len(headers):
                 row_data = {headers[i]: col.text.strip() for i, col in enumerate(cols)}
-                data.append(row_data)
-
+                # Standardize key names to what the app expects
+                processed_data = {
+                    "date": row_data.get("date"),
+                    "mandi": row_data.get("market"), # The site uses 'market', we'll call it 'mandi'
+                    "avg": row_data.get("average price") # The site uses 'average price'
+                }
+                data.append(processed_data)
+        
+        print(f"Scraping successful: Found {len(data)} price records.")
         return jsonify({
             "state": state,
             "commodity": commodity,
             "prices": data
         })
     except Exception as e:
-        print(f"Error scraping price data: {e}")
+        print(f"An unexpected error occurred during scraping: {e}")
         return jsonify({"error": "Failed to scrape price data."}), 500
 
-
-# --- Marketplace Endpoints ---
+# --- Marketplace & Pest Detection Endpoints ---
+# ... (All your other endpoints are correct and unchanged)
 @app.route('/api/listings', methods=['POST'])
 def create_listing():
     image_file = request.files.get('image')
@@ -106,7 +120,6 @@ def get_listings():
     listings = query.order_by(Listing.created_at.desc()).all()
     return jsonify([l.to_dict() for l in listings])
 
-# ... (All other marketplace endpoints are included and correct)
 @app.route('/api/listings/<int:listing_id>', methods=['GET'])
 def get_listing_detail(listing_id):
     listing = Listing.query.get(listing_id)
