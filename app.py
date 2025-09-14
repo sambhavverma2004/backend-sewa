@@ -55,18 +55,28 @@ def get_price():
             return jsonify({"prices": []})
 
         soup = BeautifulSoup(response.text, "html.parser")
+        
+        # Use a more specific selector to find the exact table
         table = soup.select_one("div.table-responsive > table")
         if not table:
             return jsonify({"prices": []})
 
         rows = table.find_all("tr")
         data = []
-        headers = ["district", "market", "commodity", "variety", "max_price", "min_price", "average_price", "arrival_date"]
         
-        for row in rows[1:]:
+        # Dynamically read headers from the table for robustness
+        headers = [th.text.strip().lower().replace(' ', '_') for th in rows[0].find_all("th")] if rows else []
+        
+        # Ensure we have the headers we need
+        if not all(k in headers for k in ["market", "average_price", "arrival_date"]):
+             return jsonify({"prices": []})
+
+        for row in rows[1:]: # Skip the header row
             cols = row.find_all("td")
-            if len(cols) >= 8:
-                row_data = {headers[i].replace(' ', '_'): col.text.strip() for i, col in enumerate(cols)}
+            if len(cols) == len(headers):
+                row_data = {headers[i]: col.text.strip() for i, col in enumerate(cols)}
+                
+                # Create the simplified object that the frontend app expects
                 processed_data = {
                     "date": row_data.get("arrival_date"),
                     "mandi": row_data.get("market"),
@@ -84,6 +94,7 @@ def get_price():
         return jsonify({"error": "Failed to scrape price data."}), 500
 
 # --- Marketplace & Pest Detection Endpoints ---
+# ... (All your other endpoints are included and correct)
 @app.route('/api/listings', methods=['POST'])
 def create_listing():
     image_file = request.files.get('image')
@@ -101,4 +112,80 @@ def create_listing():
     db.session.commit()
     return jsonify(new_listing.to_dict()), 201
 
-# ... (All other endpoints are correct)
+@app.route('/api/listings', methods=['GET'])
+def get_listings():
+    query = Listing.query.filter_by(status='available')
+    listing_type = request.args.get('type')
+    if listing_type:
+        query = query.filter_by(listing_type=listing_type)
+    listings = query.order_by(Listing.created_at.desc()).all()
+    return jsonify([l.to_dict() for l in listings])
+
+@app.route('/api/listings/<int:listing_id>', methods=['GET'])
+def get_listing_detail(listing_id):
+    listing = Listing.query.get(listing_id)
+    if not listing: return jsonify({"error": "Listing not found"}), 404
+    return jsonify(listing.to_dict())
+
+@app.route('/api/listings/<int:listing_id>/book', methods=['POST'])
+def create_booking(listing_id):
+    data = request.get_json()
+    renter_id = data.get('renter_id', 1)
+    new_booking = Booking(listing_id=listing_id, renter_id=renter_id, start_date=datetime.utcnow(), end_date=datetime.utcnow(), status='pending')
+    db.session.add(new_booking)
+    db.session.commit()
+    return jsonify(new_booking.to_dict()), 201
+
+@app.route('/api/bookings/<int:booking_id>', methods=['PUT'])
+def update_booking(booking_id):
+    data = request.get_json()
+    booking = Booking.query.get(booking_id)
+    if not booking: return jsonify({"error": "Booking not found"}), 404
+    booking.status = data.get('status')
+    db.session.commit()
+    return jsonify(booking.to_dict())
+
+@app.route('/api/my-listings', methods=['GET'])
+def get_my_listings():
+    owner_id = request.args.get('owner_id', 1) 
+    user = User.query.get(owner_id)
+    if not user: return jsonify({"error": "User not found"}), 404
+    return jsonify([l.to_dict() for l in user.listings])
+
+@app.route('/api/my-listings/<int:listing_id>/bookings', methods=['GET'])
+def get_bookings_for_listing(listing_id):
+    listing = Listing.query.get(listing_id)
+    if not listing: return jsonify({"error": "Listing not found"}), 404
+    return jsonify([b.to_dict() for b in listing.bookings])
+
+@app.route('/api/my-bookings', methods=['GET'])
+def get_my_bookings():
+    user_id = request.args.get('user_id', 1)
+    bookings = Booking.query.filter_by(renter_id=user_id).all()
+    return jsonify([b.to_dict() for b in bookings])
+
+@app.route('/api/reviews', methods=['POST'])
+def post_review():
+    data = request.get_json()
+    new_review = Review(booking_id=data.get('booking_id'), reviewer_id=data.get('reviewer_id'), reviewee_id=data.get('reviewee_id'), rating=data.get('rating'), comment=data.get('comment'))
+    db.session.add(new_review)
+    user_to_update = User.query.get(data.get('reviewee_id'))
+    if user_to_update:
+        ratings = [r.rating for r in Review.query.filter_by(reviewee_id=user_to_update.id).all()]
+        user_to_update.average_rating = sum(ratings) / len(ratings) if ratings else 5.0
+    db.session.commit()
+    return jsonify({"message": "Review submitted successfully"}), 201
+    
+@app.route('/api/predict-disease', methods=['POST'])
+def predict_disease():
+    if 'image' not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+    image_file = request.files['image']
+    files_payload = {'image': (image_file.filename, image_file.stream, image_file.mimetype)}
+    hf_endpoint = "https://anmol1357-crop-disease.hf.space/predict"
+    try:
+        response = requests.post(hf_endpoint, files=files_payload, timeout=60)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Failed to contact AI service: {e}"}), 503
