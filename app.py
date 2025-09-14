@@ -14,21 +14,19 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# --- Database Configuration ---
+# --- Configurations ---
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///sewa_mandi.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# --- ✅ UPDATED: Cloudinary Configuration with Hardcoded Keys ---
-# WARNING: This is not recommended for production. Use Environment Variables for better security.
 cloudinary.config(
-    cloud_name = "dvtjxxbtm",
-    api_key = "223263778434147",
-    api_secret = "V7MVxbF-NWQtJvWTZbtvxy9yBPI"
+    cloud_name="dvtjxxbtm",
+    api_key="223263778434147",
+    api_secret="V7MVxbF-NWQtJvWTZbtvxy9yBPI"
 )
 
 # --- Initializations ---
 db.init_app(app)
 migrate = Migrate(app, db)
+
 
 # --- API Endpoints ---
 
@@ -36,24 +34,59 @@ migrate = Migrate(app, db)
 def home():
     return jsonify({"message": "SEWA Mandi Backend is running successfully 🎉"})
 
-# Price scraping endpoint...
+# ✅ FIXED: Restored the full price scraping logic
 @app.route("/price", methods=["GET"])
 def get_price():
-    # Your price scraping logic...
-    return jsonify({"message": "Price data would be here."})
+    state = request.args.get("state", "").strip().lower()
+    commodity = request.args.get("commodity", "").strip().lower()
+    mandi = request.args.get("mandi", "").strip().lower()
+
+    if not state or not commodity:
+        return jsonify({"error": "Please provide state and commodity"}), 400
+
+    if mandi and mandi != "punjab":
+        url = f"https://www.napanta.com/agri-commodity-prices/{state}/{mandi}/{commodity}/"
+    else:
+        url = f"https://www.napanta.com/agri-commodity-prices/{state}/{commodity}/"
+
+    try:
+        response = requests.get(url)
+        if response.status_code != 200:
+            return jsonify({"prices": []})
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.find("table")
+        if not table:
+            return jsonify({"prices": []})
+
+        rows = table.find_all("tr")
+        data = []
+        headers = ["date", "mandi", "min", "max", "avg"]
+        for row in rows[1:]: # Skip the header row
+            cols = row.find_all("td")
+            if len(cols) >= 5:
+                # Create a dictionary for each row
+                row_data = {headers[i]: col.text.strip() for i, col in enumerate(cols)}
+                data.append(row_data)
+
+        return jsonify({
+            "state": state,
+            "commodity": commodity,
+            "prices": data
+        })
+    except Exception as e:
+        print(f"Error scraping price data: {e}")
+        return jsonify({"error": "Failed to scrape price data."}), 500
 
 # --- Marketplace Endpoints ---
-
+# (All your other endpoints for the marketplace remain the same)
 @app.route('/api/listings', methods=['POST'])
 def create_listing():
     image_file = request.files.get('image')
     data = request.form
     if not image_file: return jsonify({"error": "Image is required"}), 400
-    
-    # This will now work correctly with the hardcoded keys
     upload_result = cloudinary.uploader.upload(image_file)
     image_url = upload_result.get('secure_url')
-    
     user = User.query.first()
     if not user:
         user = User(phone_number="1234567890", name="Sukhdev Singh", village="Moga")
@@ -119,13 +152,7 @@ def get_my_bookings():
 @app.route('/api/reviews', methods=['POST'])
 def post_review():
     data = request.get_json()
-    new_review = Review(
-        booking_id=data.get('booking_id'),
-        reviewer_id=data.get('reviewer_id'),
-        reviewee_id=data.get('reviewee_id'),
-        rating=data.get('rating'),
-        comment=data.get('comment')
-    )
+    new_review = Review(booking_id=data.get('booking_id'), reviewer_id=data.get('reviewer_id'), reviewee_id=data.get('reviewee_id'), rating=data.get('rating'), comment=data.get('comment'))
     db.session.add(new_review)
     user_to_update = User.query.get(data.get('reviewee_id'))
     if user_to_update:
@@ -133,3 +160,39 @@ def post_review():
         user_to_update.average_rating = sum(ratings) / len(ratings) if ratings else 5.0
     db.session.commit()
     return jsonify({"message": "Review submitted successfully"}), 201
+
+# In app.py, add this new route
+# Make sure you have 'requests' in your requirements.txt
+
+@app.route('/api/predict-disease', methods=['POST'])
+def predict_disease():
+    """
+    Receives an image from the app, forwards it to the Hugging Face API,
+    and returns the prediction.
+    """
+    if 'image' not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+
+    image_file = request.files['image']
+    
+    # Prepare the file to be sent to the Hugging Face API
+    files_payload = {
+        'image': (image_file.filename, image_file.stream, image_file.mimetype)
+    }
+    
+    hf_endpoint = "https://anmol1357-crop-disease.hf.space/predict"
+
+    try:
+        # Your backend calls the Hugging Face API using the robust 'requests' library
+        response = requests.post(hf_endpoint, files=files_payload, timeout=60)
+        response.raise_for_status() # Raise an exception for bad status codes
+
+        prediction_data = response.json()
+        return jsonify(prediction_data) # Return the AI's response directly to the app
+
+    except requests.exceptions.RequestException as e:
+        # Handle network errors or timeouts when contacting Hugging Face
+        return jsonify({"error": f"Failed to contact AI service: {e}"}), 503
+    except Exception as e:
+        # Handle other unexpected errors
+        return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
